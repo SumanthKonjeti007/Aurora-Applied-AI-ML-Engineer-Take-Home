@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Data files (large binary files, not for git)
+aurora-qa-system/data/
+*.index
+*.pkl
+*.json.gz
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives (old test files)
+aurora-qa-system/archive/
+
+# Logs
+*.log
+
+# Environment
+.env
