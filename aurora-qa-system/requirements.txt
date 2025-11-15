@@ -23,7 +23,7 @@ mistralai==1.0.0
 
 # Embeddings - BGE-small-en-v1.5
 sentence-transformers==2.2.2
-torch==2.1.0
+torch==2.2.0
 
 # Search & Retrieval
 rank-bm25==0.2.2
