@@ -15,7 +15,7 @@ httpx>=0.27.0
 
 # Data Processing
 numpy==1.26.2
-pandas==2.2.0
+# pandas removed - not used in production API
 
 # LLM - Mistral AI
 mistralai==1.9.11
