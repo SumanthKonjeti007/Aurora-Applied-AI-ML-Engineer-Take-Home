@@ -32,7 +32,7 @@ qdrant-client>=1.7.1
 # Embeddings - FastEmbed (ONNX Runtime - NO torch!)
 # FastEmbed: ~200 MB vs sentence-transformers: ~4 GB
 # Uses ONNX models instead of PyTorch - much lighter!
-fastembed==0.4.2
+fastembed==0.7.3
 
 # Utilities
 python-dotenv==1.0.0
