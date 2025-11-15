@@ -8,11 +8,17 @@ venv/
 env/
 ENV/
 
-# Data files (large binary files, not for git)
-aurora-qa-system/data/
-*.index
-*.pkl
+# Data files (ignore large preprocessing files, keep production indexes)
+aurora-qa-system/data/embeddings_faiss.index
+aurora-qa-system/data/embeddings_metadata.pkl
+aurora-qa-system/data/raw_messages.json
+aurora-qa-system/data/messages_with_dates.json
+aurora-qa-system/data/triples.json
+aurora-qa-system/data/triples_old.json
+aurora-qa-system/data/knowledge_graph_old.pkl
+aurora-qa-system/data/extraction_stats.json
 *.json.gz
+*.index
 
 # IDEs
 .vscode/
