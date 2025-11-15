@@ -1,3 +1,8 @@
+# ============================================
+# PRODUCTION-OPTIMIZED REQUIREMENTS
+# Optimized for Railway deployment (<4GB)
+# ============================================
+
 # Core API Framework
 fastapi==0.115.0
 uvicorn[standard]==0.24.0
@@ -12,27 +17,16 @@ httpx>=0.27.0
 numpy==1.26.2
 pandas==2.1.3
 
-# LLM - Groq + Llama 3.1 (COMMENTED OUT)
-# groq==0.11.0
-
-# LLM - Google Gemini (COMMENTED OUT - Using Mistral)
-# google-generativeai==0.3.2
-
 # LLM - Mistral AI
 mistralai==1.9.11
-
-# Embeddings - BGE-small-en-v1.5
-sentence-transformers==2.2.2
-torch==2.2.0
 
 # Search & Retrieval
 rank-bm25==0.2.2
 
-# Vector Search
-faiss-cpu==1.8.0
+# Vector Search - Qdrant Cloud (NO LOCAL FAISS)
 qdrant-client==1.7.0
 
-# NLP & Entity Extraction
+# NLP & Entity Extraction (lightweight - only what's needed)
 spacy==3.7.2
 gliner==0.1.12
 
@@ -42,6 +36,12 @@ tqdm==4.66.1
 datefinder==0.7.3
 python-dateutil==2.8.2
 
-# Development
-pytest==7.4.3
-black==23.11.0
+# ============================================
+# REMOVED FOR PRODUCTION (saves ~3-4 GB):
+# ============================================
+# - faiss-cpu (using Qdrant Cloud instead)
+# - sentence-transformers (embeddings pre-computed)
+# - torch (not needed without sentence-transformers)
+# - pytest (development only)
+# - black (development only)
+# ============================================
