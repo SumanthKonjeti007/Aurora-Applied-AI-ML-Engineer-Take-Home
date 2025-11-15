@@ -23,6 +23,9 @@ mistralai==1.9.11
 # Search & Retrieval
 rank-bm25==0.2.2
 
+# Knowledge Graph
+networkx==3.4.2
+
 # Vector Search - Qdrant Cloud (NO LOCAL FAISS)
 qdrant-client>=1.7.1
 
