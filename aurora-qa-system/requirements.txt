@@ -1,6 +1,6 @@
 # ============================================
-# PRODUCTION-OPTIMIZED REQUIREMENTS
-# Optimized for Railway deployment (<4GB)
+# PRODUCTION REQUIREMENTS
+# All dependencies required for production deployment
 # ============================================
 
 # Core API Framework
@@ -26,9 +26,9 @@ rank-bm25==0.2.2
 # Vector Search - Qdrant Cloud (NO LOCAL FAISS)
 qdrant-client>=1.7.1
 
-# NLP & Entity Extraction (lightweight - only what's needed)
-spacy==3.7.2
-gliner==0.1.12
+# Embeddings (REQUIRED for runtime query encoding in QdrantSearch)
+sentence-transformers==2.2.2
+torch==2.2.0
 
 # Utilities
 python-dotenv==1.0.0
@@ -37,11 +37,10 @@ datefinder==0.7.3
 python-dateutil==2.8.2
 
 # ============================================
-# REMOVED FOR PRODUCTION (saves ~3-4 GB):
+# REMOVED FOR PRODUCTION:
 # ============================================
 # - faiss-cpu (using Qdrant Cloud instead)
-# - sentence-transformers (embeddings pre-computed)
-# - torch (not needed without sentence-transformers)
-# - pytest (development only)
-# - black (development only)
+# - pandas (not used in production API)
+# - spacy, gliner (only used in preprocessing scripts)
+# - pytest, black (development only)
 # ============================================
