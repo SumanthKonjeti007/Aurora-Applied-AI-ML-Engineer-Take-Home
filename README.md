@@ -1,316 +1,103 @@
-# Aurora QA System - Luxury Concierge Question-Answering
+# Aurora Question-Answering System
 
-A production-ready RAG (Retrieval-Augmented Generation) system for answering natural language questions about luxury concierge member data.
+## About This Project
 
-**Live Demo:** https://aurora-applied-ai-ml-engineer-take-home-1-b5ah.onrender.com/
+This is my submission for the Aurora Applied AI/ML Engineer take-home assessment. The goal was to build a question-answering system that can intelligently answer natural language questions about member activity data from Aurora's API.
 
----
+**Live Demo:** [https://aurora-applied-ai-ml-engineer-take-home-1-b5ah.onrender.com/](https://aurora-applied-ai-ml-engineer-take-home-1-b5ah.onrender.com/)
 
-## Quick Start
-
-### Prerequisites
-- Python 3.11+
-- Mistral AI API key
-- Qdrant Cloud instance (or use provided credentials)
-
-### Installation
-
-```bash
-# Clone repository
-git clone https://github.com/SumanthKonjeti007/Aurora-Applied-AI-ML-Engineer-Take-Home.git
-cd Aurora-Applied-AI-ML-Engineer-Take-Home/aurora-qa-system
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set environment variables
-export MISTRAL_API_KEY='your-mistral-api-key'
-export QDRANT_URL='your-qdrant-url'
-export QDRANT_API_KEY='your-qdrant-api-key'
-
-# Run the application
-uvicorn api:app --host 0.0.0.0 --port 8000
-```
-
-Visit: http://localhost:8000
+**Repository:** [https://github.com/SumanthKonjeti007/Aurora-Applied-AI-ML-Engineer-Take-Home](https://github.com/SumanthKonjeti007/Aurora-Applied-AI-ML-Engineer-Take-Home)
 
 ---
 
-## System Architecture
+## My Journey
 
-### Core Components
+This assignment turned out to be far more challenging and rewarding than I initially expected. What started as "build a simple RAG system" evolved into a deep dive into the real-world complexities of production AI systems.
 
-**1. Hybrid Retrieval System**
-- **Semantic Search (Qdrant Cloud):** Vector embeddings using FastEmbed (BAAI/bge-small-en-v1.5)
-- **BM25 Keyword Search:** Exact term matching for names, locations, and keywords
-- **Knowledge Graph:** Relationship-based retrieval using NetworkX
-- **Reciprocal Rank Fusion (RRF):** Combines all three sources with dynamic weights
+I spent considerable time wrestling with questions that don't have textbook answers:
+- How do you handle queries that need counting vs queries that need retrieval?
+- When does semantic search fail and keyword search succeed (and vice versa)?
+- How do you extract temporal information from natural language without hallucinating dates?
+- What's the real cost-performance trade-off between different embedding models and LLM providers?
 
-**2. Intelligent Query Router**
-- LLM-based classification of queries into LOOKUP (factual) or ANALYTICS (aggregation)
-- Dynamic retrieval weight adjustment based on query type
-- Fallback to rule-based routing when LLM unavailable
+The deployment phase was particularly eye-opening. Discovering that PyTorch-based models consume 4+ GB of disk space and 650+ MB of RAM forced me to rethink my entire architecture. Migrating from sentence-transformers to FastEmbed, optimizing for Render's 512 MB free tier, and ensuring the system maintains quality while fitting these constraints taught me more about production ML than any tutorial could.
 
-**3. Advanced Query Processing**
-- **Temporal Filtering:** Extracts dates from queries (e.g., "December 2025") using datefinder
-- **User Name Resolution:** Fuzzy matching for partial names (e.g., "Vikram" → "Vikram Desai")
-- **Query Decomposition:** LLM-based splitting of multi-entity queries
-
-**4. Answer Generation**
-- Mistral AI (mistral-small-latest) for natural language generation
-- Context-aware prompting with retrieved sources
-- Structured output with confidence scores
-
-### Technology Stack
-
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | HTML5, CSS3, Vanilla JavaScript |
-| **Backend** | FastAPI, Python 3.11 |
-| **LLM** | Mistral AI (mistral-small-latest) |
-| **Embeddings** | FastEmbed (ONNX) - BAAI/bge-small-en-v1.5 |
-| **Vector DB** | Qdrant Cloud |
-| **Graph DB** | NetworkX (in-memory) |
-| **Deployment** | Render (free tier, 512MB RAM) |
+What I'm most proud of isn't the code itself, but the thought process behind the decisions. Every architectural choice came from hitting a real limitation, testing an alternative, and measuring the trade-offs. That iterative problem-solving process is what I hope comes through in this work.
 
 ---
 
-## Bonus 1: Design Notes
+## What I Built
 
-### Alternative Approaches Considered
+**Core System:**
+- Hybrid retrieval combining Qdrant vector search, BM25 keyword search, and knowledge graph traversal
+- LLM-based query router that classifies questions as LOOKUP, ANALYTICS, or CONDITIONAL
+- Temporal analyzer using datefinder + LLM fallback for date extraction
+- Query decomposer that prevents hallucination on counting/aggregation queries
+- FastAPI backend with a clean, responsive frontend
 
-#### 1. Pure LLM Approach (RAG with Simple Retrieval)
-**Considered:** Using just semantic search + LLM without hybrid retrieval or routing.
+**Tech Stack:**
+- **LLM:** Mistral Small (via Mistral API)
+- **Vector Search:** Qdrant Cloud
+- **Embeddings:** FastEmbed (ONNX-based, much lighter than PyTorch)
+- **Keyword Search:** BM25
+- **Knowledge Graph:** NetworkX
+- **Framework:** FastAPI + Uvicorn
+- **Deployment:** Render (free tier)
 
-**Why Not Chosen:**
-- Semantic search alone struggled with exact name matching (e.g., "Vikram" vs "Vikram Desai")
-- Poor performance on temporal queries ("December 2025 plans")
-- No way to handle different query types optimally
-
-**What We Chose Instead:** Hybrid retrieval (semantic + BM25 + graph) with query routing for 30-40% better precision.
-
----
-
-#### 2. Fine-tuned Embedding Model
-**Considered:** Fine-tuning BAAI/bge-small-en-v1.5 on luxury concierge domain data.
-
-**Why Not Chosen:**
-- Limited training data (3,349 messages)
-- Risk of overfitting to specific clients/requests
-- Pre-trained model already performed well on luxury/travel domain
-
-**What We Chose Instead:** Off-the-shelf embeddings with hybrid retrieval to compensate for domain-specific gaps.
-
----
-
-#### 3. GraphRAG (Microsoft's Graph-Based RAG)
-**Considered:** Building entity-relationship graphs and using graph traversal for retrieval.
-
-**Why Not Chosen:**
-- Overkill for this dataset size (10 users, 3.3K messages)
-- Complex implementation with diminishing returns
-- Our simple knowledge graph (NetworkX) covered relationship queries adequately
-
-**What We Chose Instead:** Lightweight NetworkX graph as one component of hybrid retrieval, not the primary approach.
+**Key Optimizations:**
+- Replaced sentence-transformers (4 GB) with FastEmbed (200 MB)
+- Reduced RAM usage from 650 MB to 250 MB
+- Docker image: ~2 GB (was 6+ GB before optimization)
+- Query latency: ~2 seconds average
+- Cost per query: ~$0.003 (Mistral API)
 
 ---
 
-#### 4. Local LLM (Llama 3.1 or Mistral 7B)
-**Considered:** Running Ollama locally to avoid API costs and rate limits.
+## Bonus Questions
 
-**Why Not Chosen:**
-- Deployment constraints (Render free tier: 512MB RAM, can't run 7B model)
-- Slower inference (2-5 seconds per query on CPU)
-- Quality gap vs. API models
+I've prepared detailed responses to both bonus questions:
 
-**What We Chose Instead:** Mistral AI API with FastEmbed for embeddings (ONNX runtime, not PyTorch) to fit in memory constraints.
+### [Bonus 1: Design Notes](./BONUS_1_DESIGN_NOTES.md)
+An in-depth look at how my architecture evolved from simple MongoDB search to the final hybrid RAG system, plus five alternative approaches I seriously considered (fine-tuned models, full-context LLMs, SQL+Text-to-SQL, multi-agent systems, and pure knowledge graphs). I explain why I chose my approach and what trade-offs I made.
 
----
-
-#### 5. PostgreSQL with pgvector
-**Considered:** Using PostgreSQL + pgvector extension instead of Qdrant.
-
-**Why Not Chosen:**
-- Qdrant provides better filtering capabilities for temporal + user queries
-- Native support for hybrid search (dense + sparse vectors)
-- Simpler deployment (managed Qdrant Cloud vs. self-hosted Postgres)
-
-**What We Chose Instead:** Qdrant Cloud for vector search + local BM25 for keyword search.
+### [Bonus 2: Data Insights](./BONUS_2_DATA_INSIGHTS.md)
+A comprehensive analysis of the Aurora dataset, identifying anomalies like incomplete messages, category imbalances, suspiciously uniform temporal distribution, and template-like patterns. I discuss what these findings mean for the QA system and how real production data would differ.
 
 ---
 
-#### 6. Full PyTorch Stack (sentence-transformers)
-**Considered:** Using sentence-transformers library with PyTorch runtime.
+## Reflections
 
-**Why Not Chosen:**
-- PyTorch + sentence-transformers = ~4GB disk, 650MB RAM
-- Exceeded Render free tier limits (512MB RAM)
-- Deployment failures due to memory constraints
+This assignment pushed me to think like an AI engineer, not just a software engineer who uses AI tools. The difference is in the decision-making:
 
-**What We Chose Instead:** FastEmbed (ONNX runtime) - same model, 85% smaller footprint (200MB disk, 250MB RAM).
+Software engineering is about building reliable systems with predictable behavior. AI engineering is about building systems that handle uncertainty, work within cost/latency constraints, and gracefully degrade when they don't know the answer.
 
----
+I encountered problems I've never seen in traditional backend development:
+- How do you debug a system when the "bug" is the LLM choosing the wrong reasoning path?
+- How do you balance precision (giving exact answers) with recall (not missing relevant information)?
+- When should you trust the LLM's output vs compute the answer programmatically?
 
-### Final Architecture Decision
-
-**Hybrid Retrieval + Query Routing + FastEmbed**
-
-This combination provided:
-- **35% better recall** than semantic search alone (validated on test queries)
-- **Production viability** (fits in free-tier constraints)
-- **Query flexibility** (handles factual, temporal, and aggregation queries)
-- **Scalability** (Qdrant Cloud can handle millions of vectors)
+These questions don't have right answers, only trade-offs. And understanding those trade-offs—really internalizing them through trial and error—was the most valuable part of this experience.
 
 ---
 
-## Bonus 2: Data Insights
+## What's Next
 
-### Dataset Analysis
+If I were to continue developing this system, here's what I'd tackle:
 
-**Dataset:** 3,349 member messages from 10 luxury concierge clients spanning 1 year (Nov 2024 - Nov 2025)
-
-### Key Findings
-
-#### 1. Data Quality: Excellent
-- **No missing fields:** All messages have user_id, user_name, message, and timestamp
-- **No duplicates:** All 3,349 messages are unique
-- **No name inconsistencies:** Each user_id maps to exactly one user_name
-- **Clean timestamps:** All dates are valid ISO 8601 format
-
-#### 2. Distribution Patterns
-
-| Metric | Value |
-|--------|-------|
-| **Total Messages** | 3,349 |
-| **Unique Users** | 10 |
-| **Date Range** | Nov 8, 2024 - Nov 8, 2025 (364 days) |
-| **Most Active User** | 365 messages (1 per day average) |
-| **Least Active User** | 288 messages |
-| **Average per User** | 334.9 messages |
-
-**Observation:** Remarkably balanced activity across users (~10% variance), suggesting either:
-- Simulated/synthetic data with uniform distribution
-- Very consistent service usage by high-net-worth clients
-- Data sampling that normalized user activity
-
-#### 3. Message Characteristics
-- **Empty messages:** 0
-- **Very short messages (<10 chars):** 2 (likely typos or test data)
-- **Average message length:** Not analyzed but appears substantive based on samples
-
-#### 4. Temporal Patterns
-- **Uniform distribution:** ~9.2 messages per day on average
-- **No seasonality detected:** Would need deeper analysis to confirm
-- **Future dates included:** Messages contain references to dates up to November 2025, enabling time-based filtering
-
-### Anomalies Identified
-
-#### 1. Suspiciously Uniform Distribution
-- Each user has remarkably similar message counts (288-365)
-- In real-world scenarios, we'd expect more variance (Pareto distribution)
-- **Impact:** None on system functionality, but suggests synthetic data generation
-
-#### 2. Two Ultra-Short Messages
-- Found 2 messages with <10 characters
-- Likely test data or incomplete entries
-- **Impact:** Minimal - these don't affect retrieval quality significantly
-
-#### 3. Perfect Data Cleanliness
-- Zero inconsistencies in a 3.3K message dataset is unusual
-- Real-world data typically has ~2-5% quality issues
-- **Impact:** Positive for this project, but production system should handle dirty data
-
-### Recommendations for Production
-
-If this were a real production system with actual client data:
-
-1. **Add data validation:** Enforce minimum message length, validate timestamps
-2. **Handle name variations:** System already has fuzzy matching for typos
-3. **Monitor data drift:** Track message length, user activity, query patterns
-4. **Implement deduplication:** Check for near-duplicate messages (cosine similarity >0.95)
+1. **User feedback loop:** Let users thumbs-up/down answers, use that to fine-tune retrieval weights
+2. **Conversation context:** Remember previous questions in a session ("What about Italian restaurants?" should recall we were discussing User X)
+3. **Confidence scoring:** Tell the user "I'm 90% confident" vs "I found limited information"
+4. **Streaming responses:** Show chunks of the answer as they're generated (better UX for long responses)
+5. **Better analytics:** Support time-series queries ("How has my restaurant preference changed over time?")
 
 ---
 
-## Deployment
+## Acknowledgments
 
-### Environment Variables
+Thank you to the Aurora team for this thoughtful assignment. It struck the perfect balance: complex enough to be interesting, scoped enough to be completable, and open-ended enough to allow for creativity.
 
-```bash
-MISTRAL_API_KEY=your-mistral-api-key
-QDRANT_URL=https://your-qdrant-instance.qdrant.io:6333
-QDRANT_API_KEY=your-qdrant-api-key
-```
+I learned more in these few days than I have in months of reading papers and watching tutorials. There's no substitute for building something real, hitting actual constraints, and iterating toward a solution.
 
-### Production Deployment (Render)
+Looking forward to discussing this work with you.
 
-1. Fork/clone this repository
-2. Create new Web Service on Render
-3. Connect to your GitHub repository
-4. Set environment variables in Render dashboard
-5. Deploy (auto-builds from `requirements.txt` and `Procfile`)
-
-**Build time:** ~5-8 minutes
-**RAM usage:** ~250 MB (fits in 512 MB free tier)
-**Disk usage:** ~2 GB
-
----
-
-## Testing
-
-### Example Queries
-
-**Factual Lookups:**
-- "Which clients visited the Louvre?"
-- "Who requested a personal shopper in Milan?"
-- "What are Vikram Desai's travel preferences?"
-
-**Temporal Queries:**
-- "Who has plans for December 2025?"
-- "What did clients do in March?"
-
-**Aggregation:**
-- "Which restaurants are most popular among clients?"
-- "Summarize all cultural experience requests"
-
-### Health Check
-
-```bash
-curl https://aurora-applied-ai-ml-engineer-take-home-1-b5ah.onrender.com/health
-```
-
-Expected response:
-```json
-{
-  "status": "healthy",
-  "components": {
-    "qa_system": "healthy",
-    "qdrant": "connected",
-    "bm25": "loaded",
-    "knowledge_graph": "loaded",
-    "llm": "configured"
-  }
-}
-```
-
----
-
-## Documentation
-
-- **System Architecture:** See `docs/MASTER_DOCUMENTATION.md` for complete technical documentation
-- **API Reference:** Visit `/docs` (Swagger UI) or `/redoc` (ReDoc) when running locally
-
----
-
-## License
-
-This project was developed as a take-home assessment for Aurora.
-
----
-
-## Contact
-
-For questions about implementation details or architecture decisions, please refer to the comprehensive documentation in `docs/MASTER_DOCUMENTATION.md`.
+**Sumanth Konjeti**
