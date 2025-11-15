@@ -8,6 +8,7 @@ Architecture:
 - Supports temporal (date range) filtering
 - Supports user filtering
 - Compatible with existing HybridRetriever interface
+- Uses FastEmbed for lightweight local embeddings (no torch dependency)
 
 Usage:
     searcher = QdrantSearch()
@@ -22,7 +23,7 @@ import os
 from typing import List, Optional, Tuple, Dict
 from qdrant_client import QdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny, Range
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 
 class QdrantSearch:
@@ -43,11 +44,11 @@ class QdrantSearch:
         qdrant_api_key: Optional[str] = None
     ):
         """
-        Initialize Qdrant searcher
+        Initialize Qdrant searcher with FastEmbed for lightweight embeddings
 
         Args:
             collection_name: Qdrant collection name
-            model_name: Embedding model name
+            model_name: Embedding model name (FastEmbed uses ONNX models - much lighter than torch)
             qdrant_url: Qdrant server URL (env: QDRANT_URL)
             qdrant_api_key: Qdrant API key (env: QDRANT_API_KEY)
         """
@@ -64,9 +65,9 @@ class QdrantSearch:
 
         self.client = QdrantClient(url=self.qdrant_url, api_key=self.qdrant_api_key)
 
-        # Embedding model
+        # FastEmbed for lightweight embeddings (ONNX - no torch!)
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
+        self.embedding_model = TextEmbedding(model_name=model_name)
 
     def _build_filter(
         self,
@@ -157,8 +158,9 @@ class QdrantSearch:
                 ...
             ]
         """
-        # Embed query
-        query_vector = self.model.encode(query).tolist()
+        # Embed query using FastEmbed (ONNX - lightweight!)
+        query_embedding = list(self.embedding_model.embed([query]))[0]
+        query_vector = query_embedding.tolist()
 
         # Build filter
         filter_condition = self._build_filter(date_range=date_range, user_id=user_id)
