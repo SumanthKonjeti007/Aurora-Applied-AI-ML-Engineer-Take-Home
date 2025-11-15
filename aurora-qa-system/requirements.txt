@@ -24,7 +24,7 @@ mistralai==1.9.11
 rank-bm25==0.2.2
 
 # Vector Search - Qdrant Cloud (NO LOCAL FAISS)
-qdrant-client==1.7.0
+qdrant-client>=1.7.1
 
 # NLP & Entity Extraction (lightweight - only what's needed)
 spacy==3.7.2
