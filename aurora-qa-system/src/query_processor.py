@@ -14,7 +14,9 @@ from typing import List, Dict, Optional
 import re
 import os
 import json
-from groq import Groq
+# from groq import Groq  # COMMENTED OUT
+# import google.generativeai as genai  # COMMENTED OUT
+from mistralai import Mistral
 from src.name_resolver import NameResolver
 
 
@@ -39,7 +41,7 @@ class QueryProcessor:
         Args:
             name_resolver: NameResolver instance for entity detection
             use_llm: Whether to use LLM for decomposition/optimization (default: True)
-            api_key: Groq API key (optional, uses GROQ_API_KEY env var if not provided)
+            api_key: Mistral API key (optional, uses MISTRAL_API_KEY env var if not provided)
         """
         self.name_resolver = name_resolver
         self.use_llm = use_llm
@@ -48,11 +50,11 @@ class QueryProcessor:
         self.llm_client = None
         if use_llm:
             try:
-                api_key = api_key or os.environ.get('GROQ_API_KEY')
+                api_key = api_key or os.environ.get('MISTRAL_API_KEY')
                 if api_key:
-                    self.llm_client = Groq(api_key=api_key)
+                    self.llm_client = Mistral(api_key=api_key)
                 else:
-                    print("⚠️  Warning: GROQ_API_KEY not found, falling back to rule-based processing")
+                    print("⚠️  Warning: MISTRAL_API_KEY not found, falling back to rule-based processing")
                     self.use_llm = False
             except Exception as e:
                 print(f"⚠️  Warning: Failed to initialize LLM client: {e}")
@@ -86,17 +88,127 @@ class QueryProcessor:
             },
 
             # Cross-entity aggregation queries
-            # Slight preference for semantic and BM25, graph slightly lower
+            # ADJUSTED: Strong preference for semantic (Qdrant finds best matches)
             'AGGREGATION': {
-                'semantic': 1.1,
-                'bm25': 1.2,
+                'semantic': 1.5,
+                'bm25': 1.0,
                 'graph': 0.9
             }
         }
 
+    def route_query(self, query: str, verbose: bool = False) -> str:
+        """
+        Route query to appropriate pipeline using LLM classification
+
+        Args:
+            query: User query string
+            verbose: Print routing decision
+
+        Returns:
+            "LOOKUP" or "ANALYTICS"
+        """
+        # Fallback to LOOKUP if LLM not available (safe default)
+        if not self.use_llm or not self.llm_client:
+            if verbose:
+                print("🔀 Router: LLM not available, defaulting to LOOKUP")
+            return "LOOKUP"
+
+        # PRE-FILTER RULES: Handle edge cases before LLM
+        # These patterns work better with LOOKUP than ANALYTICS
+        query_lower = query.lower()
+
+        # "What types..." queries - better with LOOKUP (LLM extracts categories)
+        # ANALYTICS has limited entity database, misses diverse categories
+        if any(pattern in query_lower for pattern in [
+            "what types of",
+            "what type of",
+            "which types of",
+            "what kinds of",
+            "what kind of"
+        ]):
+            if verbose:
+                print("🔀 Router: 'What types...' pattern detected → LOOKUP")
+            return "LOOKUP"
+
+        # The corrected routing prompt
+        prompt = f"""You are a query router for a concierge QA system. Classify the query as LOOKUP or ANALYTICS.
+
+**LOOKUP** - Filter and retrieve messages by specific criteria:
+- Asks about specific people (contains names like Layla, Vikram, etc.)
+- Filters by specific dates, locations, or attributes
+- Can be answered by retrieving and reading relevant messages
+- Even if query says "which clients", if it's filtering by ONE specific thing (date/location/attribute), it's LOOKUP
+Examples:
+  ✓ "What is Layla's phone number?"
+  ✓ "Which clients have plans for January 2025?" (filter by specific date)
+  ✓ "Which clients visited Paris?" (filter by specific location)
+  ✓ "Are there clients who visited both Paris and Tokyo?" (filter by two locations)
+  ✓ "Compare Layla and Lily's preferences" (specific named people)
+  ✓ "Which clients requested private museum access?" (filter by specific service)
+  ✓ "Which clients have billing issues?" (filter by specific issue type)
+  ✓ "Vikram's Tokyo plans" (specific person)
+
+**ANALYTICS** - Find patterns through aggregation, grouping, or ranking:
+- Requires counting, grouping, finding commonalities, or ranking
+- Keywords: "SAME", "MOST", "SIMILAR", "COMMON", "POPULAR", "how many", "count"
+- Cannot be answered by simple retrieval - needs to process ALL data and aggregate
+Examples:
+  ✓ "Which clients requested the SAME restaurants?" (group by restaurant, find overlaps)
+  ✓ "Who has the MOST restaurant bookings?" (count per user, rank)
+  ✓ "What are the MOST POPULAR destinations?" (count frequency, rank)
+  ✓ "What services do MULTIPLE clients prefer?" (count per service)
+  ✓ "Find clients with SIMILAR preferences" (compare across all)
+  ✓ "Which hotel did EVERYONE book?" (aggregate all bookings)
+
+**Key Distinction:**
+- LOOKUP = Filter/retrieve by criteria → "Find all messages matching X"
+- ANALYTICS = Aggregate/group/rank → "Find patterns/commonalities across all data"
+
+**Critical Rule:**
+- If query contains SAME/MOST/SIMILAR/POPULAR/COUNT → ANALYTICS
+- Otherwise, even if "which clients" → LOOKUP
+
+User Query: "{query}"
+
+Classify this query. Respond with ONLY one word: LOOKUP or ANALYTICS
+
+Classification:"""
+
+        try:
+            response = self.llm_client.chat.complete(
+                model="mistral-small-latest",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,  # Low temperature for deterministic routing
+                max_tokens=10
+            )
+
+            classification = response.choices[0].message.content.strip().upper()
+
+            # Validate and clean response
+            if 'LOOKUP' in classification:
+                classification = 'LOOKUP'
+            elif 'ANALYTICS' in classification:
+                classification = 'ANALYTICS'
+            else:
+                # Invalid response, default to safe LOOKUP
+                if verbose:
+                    print(f"⚠️  Router: Unexpected response '{classification}', defaulting to LOOKUP")
+                return "LOOKUP"
+
+            if verbose:
+                print(f"🔀 Router: {classification}")
+
+            return classification
+
+        except Exception as e:
+            # On error, default to LOOKUP (safe fallback)
+            if verbose:
+                print(f"⚠️  Router: LLM error ({str(e)[:50]}...), defaulting to LOOKUP")
+            return "LOOKUP"
+
     def process(self, query: str, verbose: bool = False) -> List[Dict]:
         """
-        Process query: decompose if needed, classify, assign weights
+        Process query: route, decompose if needed, classify, assign weights
 
         Args:
             query: User query string
@@ -106,6 +218,7 @@ class QueryProcessor:
             List of query plans:
             [
                 {
+                    'route': 'LOOKUP' or 'ANALYTICS',
                     'query': 'simplified query string',
                     'type': 'query type',
                     'weights': {'semantic': x, 'bm25': y, 'graph': z},
@@ -120,24 +233,33 @@ class QueryProcessor:
             print(f"{'='*80}")
             print(f"Original Query: '{query}'")
 
-        # Step 1: Check if this is an aggregation query (GUARDRAIL)
-        # Aggregation queries should NOT be decomposed
-        if self._is_aggregation_query(query):
+        # Step 1: Route query to appropriate pipeline
+        route = self.route_query(query, verbose=verbose)
+
+        # Step 2: If ANALYTICS, skip decomposition (analytics handles full query)
+        if route == "ANALYTICS":
+            if verbose:
+                print(f"\nDecomposition: SKIPPED (ANALYTICS route - graph pipeline handles full query)")
+            sub_queries = [query]
+        # Step 3: For LOOKUP, check if aggregation query (GUARDRAIL)
+        # Aggregation LOOKUP queries should NOT be decomposed
+        elif self._is_aggregation_query(query):
             if verbose:
                 print(f"\nDecomposition: SKIPPED (aggregation query detected)")
             sub_queries = [query]
-        # Step 2: Decompose if multi-entity comparison (LLM-based if available)
+        # Step 4: Decompose if multi-entity comparison (LLM-based if available)
         elif self.use_llm and self.llm_client:
             sub_queries = self._decompose_llm(query, verbose=verbose)
         else:
             sub_queries = self._decompose(query, verbose=verbose)
 
-        # Step 2: Classify each sub-query and assign weights
+        # Step 5: Classify each sub-query and assign weights
         plans = []
         for i, sub_q in enumerate(sub_queries, 1):
             classification = self._classify(sub_q)
 
             plan = {
+                'route': route,  # Add routing information
                 'query': sub_q,
                 'type': classification['type'],
                 'weights': classification['weights'],
@@ -270,8 +392,8 @@ Return ONLY a JSON array of sub-queries, nothing else:
 
 If no decomposition needed, return: ["{query}"]"""
 
-            response = self.llm_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+            response = self.llm_client.chat.complete(
+                model="mistral-small-latest",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=300

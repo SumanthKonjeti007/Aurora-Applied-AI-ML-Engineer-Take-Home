@@ -13,12 +13,17 @@ __pycache__/
 *.so
 .Python
 
-# Data files
-data/*.json
-data/*.pkl
-data/*.npy
-data/*.csv
+# Data files - IMPORTANT: We need these for deployment!
+# Commenting out to include data files in deployment
+# data/*.json
+# data/*.pkl
+# data/*.npy
+# data/*.csv
 !data/.gitkeep
+
+# Only ignore large temporary files if any
+data/temp/
+data/*.tmp
 
 # Notebooks
 notebooks/*.ipynb
@@ -46,3 +51,13 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+
+# Session files and backups
+*_SESSION_CHECKPOINT.md
+*_COMPLETION_CHECKPOINT.md
+static/*_backup.html
+static/index_checkpoint*.html
+static/index_material3*.html
+static/index_futuristic*.html
+static/index_light*.html
+static/index_chat*.html

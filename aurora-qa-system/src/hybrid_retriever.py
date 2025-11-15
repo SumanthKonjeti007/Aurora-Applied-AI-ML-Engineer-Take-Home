@@ -9,7 +9,8 @@ Architecture:
 """
 from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
-from src.embeddings import EmbeddingIndex
+from src.qdrant_search import QdrantSearch  # NEW: Replaces EmbeddingIndex
+from src.temporal_analyzer import TemporalAnalyzer  # NEW: For date extraction
 from src.bm25_search import BM25Search
 from src.knowledge_graph import KnowledgeGraph
 from src.name_resolver import NameResolver
@@ -36,27 +37,29 @@ class HybridRetriever:
         """
         print("\n🔧 Initializing Hybrid Retriever...")
 
-        # Load semantic search
-        print("  1/3 Loading semantic search (embeddings)...")
-        self.embedding_index = EmbeddingIndex()
-        self.embedding_index.load(embedding_path)
+        # Load semantic search (Qdrant with temporal filtering)
+        print("  1/4 Loading semantic search (Qdrant)...")
+        self.qdrant_search = QdrantSearch()
 
-        # Load keyword search
-        print("  2/3 Loading keyword search (BM25)...")
+        # Load keyword search (BM25 - unchanged)
+        print("  2/4 Loading keyword search (BM25)...")
         self.bm25_search = BM25Search()
         self.bm25_search.load(bm25_path)
 
-        # Load knowledge graph
-        print("  3/3 Loading knowledge graph...")
+        # Load knowledge graph (unchanged)
+        print("  3/4 Loading knowledge graph...")
         self.knowledge_graph = KnowledgeGraph()
         self.knowledge_graph.load(graph_path)
 
-        # Initialize name resolver
+        # Initialize name resolver (unchanged)
         print("  4/4 Building name resolver...")
         self.name_resolver = NameResolver()
         for user_name in self.knowledge_graph.user_index.keys():
             self.name_resolver.add_user(user_name)
         print(f"       Indexed {self.name_resolver.total_users} users")
+
+        # Initialize temporal analyzer (NEW)
+        self.temporal_analyzer = TemporalAnalyzer()
 
         print("✅ Hybrid Retriever ready!")
 
@@ -69,6 +72,7 @@ class HybridRetriever:
         graph_top_k: int = 10,
         rrf_k: int = 60,
         weights: Optional[Dict[str, float]] = None,
+        query_type: str = "AGGREGATION",
         verbose: bool = False
     ) -> List[Tuple[Dict, float]]:
         """
@@ -82,6 +86,7 @@ class HybridRetriever:
             graph_top_k: Number of results from graph
             rrf_k: RRF constant (default 60)
             weights: Method weights {'semantic': w1, 'bm25': w2, 'graph': w3}
+            query_type: Query classification (AGGREGATION, ENTITY_SPECIFIC_BROAD, etc.)
             verbose: Print retrieval details
 
         Returns:
@@ -114,14 +119,32 @@ class HybridRetriever:
             if verbose and user_id:
                 print(f"   🔍 User filtering: {users_detected[0]} (id: {user_id[:8]}...)")
 
-        # ========== RETRIEVAL 1: SEMANTIC SEARCH ==========
-        if verbose:
-            print(f"\n  1/3 Semantic search (top {semantic_top_k})...")
+        # ========== TEMPORAL DETECTION (NEW) ==========
+        # Extract date range from query for temporal filtering
+        date_range = self.temporal_analyzer.extract_date_range(query)
+        if verbose and date_range:
+            print(f"   📅 Temporal filtering: {date_range[0]} to {date_range[1]}")
 
-        semantic_results = self.embedding_index.search(query, top_k=semantic_top_k, user_id=user_id)
+        # ========== RETRIEVAL 1: SEMANTIC SEARCH (QDRANT) ==========
+        if verbose:
+            print(f"\n  1/3 Semantic search (Qdrant, top {semantic_top_k})...")
+
+        # NEW: Pass date_range to Qdrant for Filter-then-Rank
+        semantic_results_raw = self.qdrant_search.search(
+            query,
+            top_k=semantic_top_k,
+            user_id=user_id,
+            date_range=date_range  # NEW: Temporal filtering
+        )
+
+        # Convert Qdrant format to hybrid retriever format
+        semantic_results = [(r, r['score']) for r in semantic_results_raw]
 
         if verbose:
             print(f"      Retrieved {len(semantic_results)} results")
+            if date_range:
+                date_matches = sum(1 for r in semantic_results_raw if r['normalized_dates'])
+                print(f"      Messages with dates: {date_matches}/{len(semantic_results)}")
 
         # ========== RETRIEVAL 2: BM25 KEYWORD SEARCH ==========
         if verbose:
@@ -129,8 +152,14 @@ class HybridRetriever:
 
         bm25_results = self.bm25_search.search(query, top_k=bm25_top_k, user_id=user_id)
 
+        # POST-FILTER: Apply temporal filter to BM25 results if date_range specified
+        if date_range:
+            bm25_results = self._filter_by_date_range(bm25_results, date_range)
+
         if verbose:
             print(f"      Retrieved {len(bm25_results)} results")
+            if date_range:
+                print(f"      (after temporal filtering)")
 
         # ========== RETRIEVAL 3: KNOWLEDGE GRAPH ==========
         if verbose:
@@ -138,8 +167,14 @@ class HybridRetriever:
 
         graph_results = self._graph_search(query, top_k=graph_top_k, verbose=verbose)
 
+        # POST-FILTER: Apply temporal filter to Graph results if date_range specified
+        if date_range:
+            graph_results = self._filter_by_date_range(graph_results, date_range)
+
         if verbose:
             print(f"      Retrieved {len(graph_results)} results")
+            if date_range:
+                print(f"      (after temporal filtering)")
 
         # ========== RRF FUSION ==========
         if verbose:
@@ -155,9 +190,104 @@ class HybridRetriever:
 
         if verbose:
             print(f"      Fused {len(fused_results)} unique messages")
-            print(f"      Returning top {top_k}")
 
-        return fused_results[:top_k]
+        # ========== DIVERSITY ENFORCEMENT (CONDITIONAL) ==========
+        # Apply diversity ONLY for AGGREGATION queries to prevent user over-representation
+        # For ENTITY_SPECIFIC queries, allow more messages per user for complete context
+
+        if query_type == "AGGREGATION":
+            # Aggregation queries: Need diversity across users (max 2 per user)
+            diverse_results = self._diversify_by_user(fused_results, max_per_user=2, top_k=top_k)
+
+            if verbose:
+                print(f"      Applied diversity filter (AGGREGATION: max 2 per user)")
+                print(f"      Returning top {len(diverse_results)}")
+                user_dist = {}
+                for msg, _ in diverse_results:
+                    user = msg.get('user_name', 'Unknown')
+                    user_dist[user] = user_dist.get(user, 0) + 1
+                print(f"      User distribution: {user_dist}")
+
+            return diverse_results
+
+        else:
+            # Entity-specific queries: Allow high user concentration for complete context
+            # Use diversity with high limit (10) or just take top_k
+            diverse_results = self._diversify_by_user(fused_results, max_per_user=10, top_k=top_k)
+
+            if verbose:
+                print(f"      Applied diversity filter (ENTITY_SPECIFIC: max 10 per user)")
+                print(f"      Returning top {len(diverse_results)}")
+                user_dist = {}
+                for msg, _ in diverse_results:
+                    user = msg.get('user_name', 'Unknown')
+                    user_dist[user] = user_dist.get(user, 0) + 1
+                print(f"      User distribution: {user_dist}")
+
+            return diverse_results
+
+    def _filter_by_date_range(
+        self,
+        results,
+        date_range: Tuple[str, str]
+    ):
+        """
+        Filter results to only include messages within the specified date range
+
+        Args:
+            results: List of (message_dict, score) tuples OR List of message_dicts
+            date_range: (start_date, end_date) in ISO format
+
+        Returns:
+            Filtered list in same format as input
+        """
+        from datetime import datetime, timedelta
+
+        start_date_str, end_date_str = date_range
+        start = datetime.fromisoformat(start_date_str).date()
+        end = datetime.fromisoformat(end_date_str).date()
+
+        # Detect input format
+        if not results:
+            return results
+
+        # Check if results are tuples (msg, score) or just dicts
+        is_tuple_format = isinstance(results[0], tuple)
+
+        filtered = []
+        for item in results:
+            # Extract message dict
+            if is_tuple_format:
+                msg, score = item
+            else:
+                msg = item
+                score = None
+
+            # Get normalized_dates from message
+            normalized_dates = msg.get('normalized_dates', [])
+
+            # If no dates in message, exclude it
+            if not normalized_dates:
+                continue
+
+            # Check if any date in message falls within the range
+            has_matching_date = False
+            for date_str in normalized_dates:
+                try:
+                    msg_date = datetime.fromisoformat(date_str).date()
+                    if start <= msg_date <= end:
+                        has_matching_date = True
+                        break
+                except (ValueError, TypeError):
+                    continue
+
+            if has_matching_date:
+                if is_tuple_format:
+                    filtered.append((msg, score))
+                else:
+                    filtered.append(msg)
+
+        return filtered
 
     def _graph_search(
         self,
@@ -301,7 +431,7 @@ class HybridRetriever:
                         continue
 
                     # Find the message
-                    msg = next((m for m in self.embedding_index.messages
+                    msg = next((m for m in self.bm25_search.messages
                               if m['id'] == msg_id), None)
 
                     if msg:
@@ -345,7 +475,7 @@ class HybridRetriever:
                             if msg_id in seen_ids:
                                 continue
 
-                            msg = next((m for m in self.embedding_index.messages
+                            msg = next((m for m in self.bm25_search.messages
                                       if m['id'] == msg_id), None)
 
                             if msg and keyword in msg['message'].lower():
@@ -362,6 +492,80 @@ class HybridRetriever:
                     break
 
         return graph_messages[:top_k]
+
+    def _diversify_by_user(
+        self,
+        results: List[Tuple[Dict, float]],
+        max_per_user: int = 2,
+        top_k: int = 10
+    ) -> List[Tuple[Dict, float]]:
+        """
+        Ensure no single user dominates results (diversity enforcement)
+
+        Problem solved: RRF can cause user over-representation where one user's
+        multiple messages crowd out correct answers from other users.
+
+        Strategy (Round-Robin):
+        1. Group messages by user
+        2. Sort users by their best (earliest) RRF position
+        3. Round 1: Take 1 message from each user (their best message)
+        4. Round 2: Take 2nd message from each user (if they have one)
+        5. Stop when we have top_k messages
+
+        This ensures ALL users get at least 1 message before anyone gets 2.
+
+        Example:
+        - RRF positions 1-10: Lorenzo(3), Sophia(4), Amina(2), Fatima(1)
+        - RRF positions 11-18: Vikram(2), Hans(2), Lily(2)
+
+        Round-robin result:
+        - Round 1: Lorenzo(1), Sophia(1), Amina(1), Fatima(1), Vikram(1), Hans(1), Lily(1) = 7 messages
+        - Round 2: Lorenzo(1), Sophia(1), Amina(1) = 3 more messages
+        - Total: All 7 users included ✅
+
+        Args:
+            results: List of (message, rrf_score) tuples from RRF fusion
+            max_per_user: Maximum messages per user in final results (default 2)
+            top_k: Number of final results to return (default 10)
+
+        Returns:
+            Diversified list of (message, rrf_score) tuples with max_per_user limit
+        """
+        # Track all messages by user
+        user_messages = {}  # user -> [(msg, score, original_position), ...]
+
+        for position, (msg, score) in enumerate(results):
+            user = msg.get('user_name', 'Unknown')
+            if user not in user_messages:
+                user_messages[user] = []
+            user_messages[user].append((msg, score, position))
+
+        # Sort users by their best (earliest) RRF position
+        sorted_users = sorted(
+            user_messages.items(),
+            key=lambda x: min(pos for _, _, pos in x[1])
+        )
+
+        # Round-robin selection
+        diversified = []
+        round_num = 0
+
+        while len(diversified) < top_k and round_num < max_per_user:
+            for user, messages in sorted_users:
+                if round_num < len(messages):
+                    msg, score, pos = messages[round_num]
+                    diversified.append((msg, score, pos))
+
+                    if len(diversified) >= top_k:
+                        break
+
+            round_num += 1
+
+        # Sort by original RRF position to maintain relative ordering
+        diversified.sort(key=lambda x: x[2])
+
+        # Return top_k, without position info
+        return [(msg, score) for msg, score, _ in diversified[:top_k]]
 
     def _reciprocal_rank_fusion(
         self,

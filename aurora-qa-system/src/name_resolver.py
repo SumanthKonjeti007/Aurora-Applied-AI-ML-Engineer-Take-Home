@@ -40,6 +40,33 @@ class NameResolver:
         self.total_users = 0
         self.ambiguous_parts: Set[str] = set()  # Parts shared by multiple users
 
+        # Stop words to exclude from name matching (common query words)
+        self.stop_words = {
+            'has', 'have', 'had', 'who', 'what', 'when', 'where', 'why', 'how',
+            'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might',
+            'can', 'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'than',
+            'this', 'that', 'these', 'those', 'for', 'to', 'from', 'by', 'at',
+            'in', 'on', 'of', 'with', 'as', 'my', 'your', 'his', 'her', 'its',
+            'our', 'their', 'me', 'you', 'him', 'she', 'it', 'we', 'they', 'us',
+            'them', 'get', 'got', 'give', 'gave', 'make', 'made', 'take', 'took',
+            'come', 'came', 'go', 'went', 'see', 'saw', 'know', 'knew', 'think',
+            'thought', 'tell', 'told', 'ask', 'asked', 'work', 'worked', 'use',
+            'used', 'find', 'found', 'give', 'given', 'call', 'called', 'try',
+            'tried', 'need', 'needed', 'want', 'wanted', 'let', 'put', 'mean',
+            'keep', 'kept', 'begin', 'began', 'seem', 'seemed', 'help', 'helped',
+            'show', 'showed', 'hear', 'heard', 'play', 'played', 'run', 'ran',
+            'move', 'moved', 'live', 'lived', 'believe', 'believed', 'bring',
+            'brought', 'happen', 'happened', 'write', 'wrote', 'sit', 'sat',
+            'stand', 'stood', 'lose', 'lost', 'pay', 'paid', 'meet', 'met',
+            'include', 'included', 'continue', 'continued', 'set', 'learn',
+            'learned', 'change', 'changed', 'lead', 'led', 'understand',
+            'understood', 'watch', 'watched', 'follow', 'followed', 'stop',
+            'stopped', 'create', 'created', 'speak', 'spoke', 'read', 'allow',
+            'allowed', 'add', 'added', 'spend', 'spent', 'grow', 'grew', 'open',
+            'opened', 'walk', 'walked', 'win', 'won', 'offer', 'offered', 'number'
+        }
+
         # Load user_index if available
         self._load_user_index()
 
@@ -173,9 +200,10 @@ class NameResolver:
         Resolve a query name to canonical full name
 
         Resolution order:
-        1. Exact match (full name)
-        2. Partial match (name part)
-        3. Fuzzy match (typo tolerance)
+        1. Stop word check (skip common query words)
+        2. Exact match (full name)
+        3. Partial match (name part)
+        4. Fuzzy match (typo tolerance)
 
         Args:
             query_name: Name to resolve (e.g., "Sophia", "Al-Farsi", "sofia")
@@ -188,6 +216,16 @@ class NameResolver:
             return None
 
         query_norm = self._normalize(query_name)
+
+        # 0. Stop word check - skip common query words
+        if query_norm in self.stop_words:
+            return None
+
+        # Additional safety: require minimum length of 3 characters
+        # This prevents matching "Al", "El", "De", "La" which are common prefixes
+        # Unless they're exact matches in our index
+        if len(query_norm) < 3 and query_norm not in self.name_parts_index:
+            return None
 
         # 1. Exact match (full name)
         if query_norm in self.canonical_names:
@@ -243,6 +281,11 @@ class NameResolver:
         """
         Find best fuzzy match using string similarity
 
+        Fuzzy matching requirements:
+        - Query must be at least 4 characters (prevents short word false positives)
+        - OR first letter must match (allows typos in longer names)
+        - Similarity must be >= threshold
+
         Args:
             query_norm: Normalized query string
             threshold: Minimum similarity score (0.0-1.0)
@@ -250,11 +293,20 @@ class NameResolver:
         Returns:
             Best matching full name or None
         """
+        # Safety: only do fuzzy matching for queries >= 4 characters
+        # This prevents "has" from matching "hans", "who" from matching name parts, etc.
+        if len(query_norm) < 4:
+            return None
+
         best_match = None
         best_score = 0.0
 
         # Check against all canonical names
         for norm_name, full_name in self.canonical_names.items():
+            # Require first letter match for stricter fuzzy matching
+            if query_norm[0] != norm_name[0]:
+                continue
+
             similarity = SequenceMatcher(None, query_norm, norm_name).ratio()
             if similarity > best_score and similarity >= threshold:
                 best_score = similarity
@@ -262,6 +314,10 @@ class NameResolver:
 
         # Also check against name parts
         for part_norm, full_names in self.name_parts_index.items():
+            # Require first letter match for stricter fuzzy matching
+            if query_norm[0] != part_norm[0]:
+                continue
+
             similarity = SequenceMatcher(None, query_norm, part_norm).ratio()
             if similarity > best_score and similarity >= threshold:
                 best_score = similarity

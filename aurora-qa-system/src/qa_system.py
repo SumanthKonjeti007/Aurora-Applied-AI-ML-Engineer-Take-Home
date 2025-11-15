@@ -19,6 +19,7 @@ from src.query_processor import QueryProcessor
 from src.hybrid_retriever import HybridRetriever
 from src.result_composer import ResultComposer
 from src.answer_generator import AnswerGenerator
+from src.graph_analytics import GraphAnalytics
 
 
 class QASystem:
@@ -65,13 +66,20 @@ class QASystem:
         # Initialize answer generator
         self.generator = AnswerGenerator(api_key=groq_api_key)
 
+        # Initialize graph analytics pipeline
+        print("\n  6/6 Initializing graph analytics pipeline...")
+        self.analytics = GraphAnalytics(
+            knowledge_graph=self.retriever.knowledge_graph,
+            api_key=groq_api_key
+        )
+
         print("\n✅ QA System ready!")
         print("="*80)
 
     def answer(
         self,
         query: str,
-        top_k: int = 10,
+        top_k: int = 20,
         temperature: float = 0.3,
         verbose: bool = False
     ) -> Dict:
@@ -80,7 +88,7 @@ class QASystem:
 
         Args:
             query: User question
-            top_k: Number of context messages to retrieve
+            top_k: Number of context messages to retrieve (default: 20)
             temperature: LLM temperature for answer generation
             verbose: Print detailed pipeline execution
 
@@ -107,8 +115,30 @@ class QASystem:
 
         query_plans = self.processor.process(query, verbose=verbose)
 
-        # ========== STEP 2: HYBRID RETRIEVAL ==========
+        # ========== ROUTING: Check if ANALYTICS or LOOKUP ==========
+        route = query_plans[0].get('route', 'LOOKUP')
+
+        if route == "ANALYTICS":
+            # Use Graph Analytics Pipeline
+            if verbose:
+                print("\n🔀 ROUTE: ANALYTICS → Using Graph Analytics Pipeline")
+                print("-"*80)
+
+            analytics_result = self.analytics.analyze(query, verbose=verbose)
+
+            # Format as standard result
+            return {
+                'query': query,
+                'answer': analytics_result['answer'],
+                'sources': [],  # Analytics doesn't return message sources
+                'query_plans': query_plans,
+                'analytics_data': analytics_result['aggregated_data'],
+                'route': 'ANALYTICS'
+            }
+
+        # ========== STEP 2: HYBRID RETRIEVAL (LOOKUP Route) ==========
         if verbose:
+            print("\n🔀 ROUTE: LOOKUP → Using RAG Pipeline")
             print("\nSTEP 2: Hybrid Retrieval")
             print("-"*80)
 
@@ -122,11 +152,12 @@ class QASystem:
                       f"bm25={plan['weights']['bm25']}, "
                       f"graph={plan['weights']['graph']}")
 
-            # Retrieve with dynamic weights
+            # Retrieve with dynamic weights AND query type for conditional diversity
             results = self.retriever.search(
                 query=plan['query'],
                 top_k=top_k,
                 weights=plan['weights'],
+                query_type=plan['type'],  # Pass query type for conditional diversity
                 verbose=False  # Suppress retriever verbose to avoid clutter
             )
 
@@ -163,6 +194,7 @@ class QASystem:
         result['query'] = query
         result['query_plans'] = query_plans
         result['num_sources'] = len(composed_results)
+        result['route'] = 'LOOKUP'
 
         if verbose:
             print(f"\n{'='*80}")

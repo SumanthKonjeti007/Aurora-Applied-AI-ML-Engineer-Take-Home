@@ -6,37 +6,39 @@ Generates natural language answers using LLM with retrieved context (RAG).
 Architecture:
 - Takes user query + retrieved context
 - Constructs RAG prompt
-- Calls LLM (Groq/OpenAI)
+- Calls LLM (Mistral AI)
 - Returns formatted answer
 
 This is the final step in the pipeline: Query → Retrieve → Generate Answer
 """
 from typing import List, Tuple, Dict, Optional
 import os
-from groq import Groq
+# from groq import Groq  # COMMENTED OUT
+# import google.generativeai as genai  # COMMENTED OUT
+from mistralai import Mistral
 
 
 class AnswerGenerator:
     """
     Generate answers using LLM with retrieved context (RAG)
 
-    Uses Groq API with Llama 3.1 70B model for fast, high-quality responses.
+    Uses Mistral AI API (mistral-small-latest) for fast, high-quality responses.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "llama-3.3-70b-versatile"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "mistral-small-latest"):
         """
         Initialize answer generator
 
         Args:
-            api_key: Groq API key (or use GROQ_API_KEY env var)
-            model: LLM model to use
+            api_key: Mistral API key (or use MISTRAL_API_KEY env var)
+            model: LLM model to use (default: mistral-small-latest)
         """
-        self.api_key = api_key or os.environ.get('GROQ_API_KEY')
+        self.api_key = api_key or os.environ.get('MISTRAL_API_KEY')
         if not self.api_key:
-            raise ValueError("Groq API key required. Set GROQ_API_KEY env var or pass api_key.")
+            raise ValueError("Mistral API key required. Set MISTRAL_API_KEY env var or pass api_key.")
 
         self.model = model
-        self.client = Groq(api_key=self.api_key)
+        self.client = Mistral(api_key=self.api_key)
 
     def generate(
         self,
@@ -79,9 +81,9 @@ class AnswerGenerator:
             print(f"Prompt length: {len(prompt)} chars")
             print(f"{'='*80}\n")
 
-        # Call LLM
+        # Call LLM (Mistral)
         try:
-            response = self.client.chat.completions.create(
+            response = self.client.chat.complete(
                 model=self.model,
                 messages=[
                     {
@@ -127,17 +129,72 @@ class AnswerGenerator:
         Returns:
             System prompt string
         """
-        return """You are a helpful concierge assistant for a luxury lifestyle management service.
+        return """You are an intelligent concierge assistant for a luxury lifestyle management service.
 
-Your role:
-- Answer user questions based on the provided context (member messages and requests)
-- Be concise, professional, and helpful
-- If the context doesn't contain enough information, say so honestly
-- For comparison questions, present information about both parties fairly
-- Use specific details from the context to support your answers
-- Don't make up information not present in the context
+Your answers will be displayed directly in a UI to users, so they must be:
+✓ Clear and concise (2-4 sentences for simple questions, structured lists for complex ones)
+✓ Natural and conversational (avoid robotic language)
+✓ Actionable (provide insights, not just raw data)
+✓ Professional yet warm
 
-Tone: Professional, warm, and service-oriented."""
+MARKDOWN FORMATTING REQUIRED:
+- **Use markdown** for all responses - your output will be rendered as HTML
+- Use **bold** for client names and important details: **Name**
+- Use bullet points with `-` or `*` for lists
+- Use numbered lists `1.` when order matters
+- Add line breaks between items for readability
+
+RESPONSE FORMAT RULES:
+
+1. SHORT ANSWERS (for simple lookups):
+   - Direct answer in 1-3 sentences
+   - Example: "**Vikram Desai** has requested spa services at several locations including Tokyo and Paris."
+
+2. LISTS (for "which clients" or multiple items):
+   - Use markdown bullet points with bold names
+   - Keep each item concise (name + key detail)
+   - Example:
+     "6 clients requested a personal shopper in Milan:
+
+     - **Vikram Desai**: Requested for the 12th
+     - **Thiago Monteiro**: For an upcoming visit
+     - **Hans Müller**: During his Milan visit
+     - **Lorenzo Cavalli**: Looking for suggestions and recommendations
+     - **Sophia Al-Farsi**: For a shopping day and tour
+     - **Amina Van Den Berg**: For next weekend"
+
+3. SUMMARIES (for preferences/patterns):
+   - Lead with the key insight
+   - Support with 2-3 examples using bold for names
+   - Example: "Most clients prefer evening reservations. For instance, **Thiago** typically books 8 PM slots, while **Layla** prefers 7:30 PM."
+
+4. NO DATA FOUND:
+   - Be helpful, not dismissive
+   - Suggest alternatives
+   - Example: "I don't have specific car ownership information for Vikram Desai. However, I can see he frequently requests car services in NYC and private transfers to airports. Would you like to know more about his transportation preferences?"
+
+CRITICAL ACCURACY RULES:
+
+1. NEVER mention technical details:
+   ✗ "Based on message 1, 5, and 8..."
+   ✗ "The context shows..."
+   ✗ "According to the provided data..."
+   ✓ Just state the facts naturally
+
+2. NEVER merge separate facts into new claims:
+   ✗ "Client stayed at Four Seasons Tokyo" (if one message says Four Seasons, another says Tokyo)
+   ✓ "Client has stayed at Four Seasons properties and visited Tokyo"
+
+3. IF UNCERTAIN, be honest but helpful:
+   ✗ "I don't have that information." (too blunt)
+   ✓ "I don't see specific details about X, but I found related information about Y. Would that be helpful?"
+
+4. AGGREGATE intelligently:
+   - For "which clients" queries: List names with brief context
+   - For counts: Give the number first, then details if needed
+   - For comparisons: Highlight similarities/differences clearly
+
+Tone: Professional, conversational, and helpful. Think "knowledgeable assistant" not "database query result"."""
 
     def _build_prompt(self, query: str, context: str) -> str:
         """
@@ -150,15 +207,34 @@ Tone: Professional, warm, and service-oriented."""
         Returns:
             Formatted prompt string
         """
-        prompt = f"""Based on the following member messages and requests, please answer the user's question.
+        # Detect query type for better formatting hints
+        query_lower = query.lower()
 
-CONTEXT:
+        if any(word in query_lower for word in ['which', 'who', 'what clients', 'list']):
+            format_hint = "\n\nFormat: Provide a markdown bullet list with **bold client names**. Lead with a count (e.g., '5 clients requested...'). Use this format:\n- **Name**: Brief detail\n- **Name**: Brief detail"
+        elif any(word in query_lower for word in ['how many', 'count', 'number of']):
+            format_hint = "\n\nFormat: Start with the number, then provide brief supporting details if relevant. Use **bold** for emphasis."
+        elif any(word in query_lower for word in ['compare', 'difference', 'similar']):
+            format_hint = "\n\nFormat: Highlight key similarities or differences. Use a comparison structure."
+        elif any(word in query_lower for word in ['preference', 'prefer', 'favorite']):
+            format_hint = "\n\nFormat: Summarize the preference pattern with 2-3 concrete examples."
+        else:
+            format_hint = "\n\nFormat: Answer directly and concisely in 2-4 sentences."
+
+        prompt = f"""Answer this question using the client messages below.
+
+QUESTION: {query}
+
+CLIENT MESSAGES:
 {context}
+{format_hint}
 
-USER QUESTION:
-{query}
+IMPORTANT:
+- Answer naturally (no technical references like "message 1" or "context shows")
+- If information is incomplete, be helpful: acknowledge what you found and offer related info
+- Focus on being useful for a UI display - clear and actionable
 
-Please provide a clear, concise answer based on the context above. If the context doesn't contain enough information to fully answer the question, acknowledge what information is available and what is missing."""
+Answer:"""
 
         return prompt
 
