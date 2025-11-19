@@ -14,9 +14,8 @@ from typing import List, Dict, Optional
 import re
 import os
 import json
-# from groq import Groq  # COMMENTED OUT
-# import google.generativeai as genai  # COMMENTED OUT
-from mistralai import Mistral
+from groq import Groq
+# from mistralai import Mistral  # SWITCHED TO GROQ FOR BETTER RATE LIMITS
 from src.name_resolver import NameResolver
 
 
@@ -50,11 +49,11 @@ class QueryProcessor:
         self.llm_client = None
         if use_llm:
             try:
-                api_key = api_key or os.environ.get('MISTRAL_API_KEY')
+                api_key = api_key or os.environ.get('GROQ_API_KEY')
                 if api_key:
-                    self.llm_client = Mistral(api_key=api_key)
+                    self.llm_client = Groq(api_key=api_key)
                 else:
-                    print("⚠️  Warning: MISTRAL_API_KEY not found, falling back to rule-based processing")
+                    print("⚠️  Warning: GROQ_API_KEY not found, falling back to rule-based processing")
                     self.use_llm = False
             except Exception as e:
                 print(f"⚠️  Warning: Failed to initialize LLM client: {e}")
@@ -175,8 +174,8 @@ Classify this query. Respond with ONLY one word: LOOKUP or ANALYTICS
 Classification:"""
 
         try:
-            response = self.llm_client.chat.complete(
-                model="mistral-small-latest",
+            response = self.llm_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,  # Low temperature for deterministic routing
                 max_tokens=10
@@ -392,8 +391,8 @@ Return ONLY a JSON array of sub-queries, nothing else:
 
 If no decomposition needed, return: ["{query}"]"""
 
-            response = self.llm_client.chat.complete(
-                model="mistral-small-latest",
+            response = self.llm_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=300

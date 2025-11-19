@@ -16,7 +16,7 @@ import json
 from typing import List, Dict, Optional, Tuple
 from collections import defaultdict
 # from groq import Groq  # COMMENTED OUT
-from mistralai import Mistral
+from groq import Groq  # SWITCHED TO GROQ
 from src.knowledge_graph import KnowledgeGraph
 
 
@@ -41,10 +41,10 @@ class GraphAnalytics:
         self.kg = knowledge_graph
 
         # Initialize LLM client
-        api_key = api_key or os.environ.get('MISTRAL_API_KEY')
+        api_key = api_key or os.environ.get('GROQ_API_KEY')
         if not api_key:
-            raise ValueError("MISTRAL_API_KEY not found in environment")
-        self.llm = Mistral(api_key=api_key)
+            raise ValueError("GROQ_API_KEY not found in environment")
+        self.llm = Groq(api_key=api_key)
 
     def analyze(self, query: str, verbose: bool = False) -> Dict:
         """
@@ -128,8 +128,8 @@ Respond in JSON format:
 JSON:"""
 
         try:
-            response = self.llm.chat.complete(
-                model="mistral-small-latest",
+            response = self.llm.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=200
@@ -488,8 +488,8 @@ UI DISPLAY REQUIREMENTS:
 Answer:"""
 
         try:
-            response = self.llm.chat.complete(
-                model="mistral-small-latest",
+            response = self.llm.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=300

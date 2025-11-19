@@ -13,32 +13,31 @@ This is the final step in the pipeline: Query → Retrieve → Generate Answer
 """
 from typing import List, Tuple, Dict, Optional
 import os
-# from groq import Groq  # COMMENTED OUT
-# import google.generativeai as genai  # COMMENTED OUT
-from mistralai import Mistral
+from groq import Groq
+# from mistralai import Mistral  # SWITCHED TO GROQ FOR BETTER RATE LIMITS
 
 
 class AnswerGenerator:
     """
     Generate answers using LLM with retrieved context (RAG)
 
-    Uses Mistral AI API (mistral-small-latest) for fast, high-quality responses.
+    Uses Groq API (llama-3.3-70b-versatile) for fast, high-quality responses with generous rate limits.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "mistral-small-latest"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "llama-3.3-70b-versatile"):
         """
         Initialize answer generator
 
         Args:
-            api_key: Mistral API key (or use MISTRAL_API_KEY env var)
-            model: LLM model to use (default: mistral-small-latest)
+            api_key: Groq API key (or use GROQ_API_KEY env var)
+            model: LLM model to use (default: llama-3.3-70b-versatile)
         """
-        self.api_key = api_key or os.environ.get('MISTRAL_API_KEY')
+        self.api_key = api_key or os.environ.get('GROQ_API_KEY')
         if not self.api_key:
-            raise ValueError("Mistral API key required. Set MISTRAL_API_KEY env var or pass api_key.")
+            raise ValueError("Groq API key required. Set GROQ_API_KEY env var or pass api_key.")
 
         self.model = model
-        self.client = Mistral(api_key=self.api_key)
+        self.client = Groq(api_key=self.api_key)
 
     def generate(
         self,
@@ -81,9 +80,9 @@ class AnswerGenerator:
             print(f"Prompt length: {len(prompt)} chars")
             print(f"{'='*80}\n")
 
-        # Call LLM (Mistral)
+        # Call LLM (Groq)
         try:
-            response = self.client.chat.complete(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
