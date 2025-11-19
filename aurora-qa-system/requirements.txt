@@ -27,7 +27,8 @@ rank-bm25==0.2.2
 networkx==3.4.2
 
 # Vector Search - Qdrant Cloud (NO LOCAL FAISS)
-qdrant-client>=1.7.1
+# Pinned to 1.11.3 for stable API (newer versions work too, but this is tested)
+qdrant-client==1.11.3
 
 # Embeddings - FastEmbed (ONNX Runtime - NO torch!)
 # FastEmbed: ~200 MB vs sentence-transformers: ~4 GB
